@@ -13,7 +13,9 @@ app = Flask(__name__)
 PRESENCE_SCRIPT_NAME = "presence_detector.py"
 PATH_TO_PRESENCE_SCRIPT = f"/home/mickaelramilison/{PRESENCE_SCRIPT_NAME}"
 COMMAND_START_PICFRAME = ["/home/mickaelramilison/start_picframe.sh"]
-MANUAL_OVERRIDE_FLAG = "/tmp/manual_override.flag"
+# Use the user's home directory for a persistent flag
+USER_HOME = os.path.expanduser("~") # Gets /home/mickaelramilison
+MANUAL_OVERRIDE_FLAG = os.path.join(USER_HOME, "manual_override.flag")
 
 # --- Environment ---
 env = os.environ.copy()

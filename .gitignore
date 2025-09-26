@@ -29,3 +29,4 @@ rclone_last_sync.log
 trilium-data/
 venv_picframe/
 venv_web/
+.*

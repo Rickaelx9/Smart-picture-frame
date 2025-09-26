@@ -4,7 +4,6 @@ import time
 import os
 from datetime import datetime, date
 
-# --- NEW: Add a delay at the very start ---
 # Give the desktop environment 10 seconds to fully load after a reboot.
 print("Script started. Waiting 10 seconds for desktop to initialize...")
 time.sleep(10)
@@ -17,7 +16,13 @@ AWAY_SCAN_INTERVAL = 60
 SLEEPING_SCAN_INTERVAL = 1800
 ACTIVE_START_HOUR = 8
 ACTIVE_END_HOUR = 23
-MANUAL_OVERRIDE_FLAG = "/tmp/manual_override.flag"
+
+# --- Use the user's home directory for persistent flags ---
+# The /tmp directory is wiped on reboot, so we use the home directory instead.
+USER_HOME = os.path.expanduser("~") # Gets /home/mickaelramilison
+MANUAL_OVERRIDE_FLAG = os.path.join(USER_HOME, "manual_override.flag")
+REBOOT_FLAG = os.path.join(USER_HOME, "reboot_done.flag")
+
 
 # --- Environment and Commands ---
 env = os.environ.copy()
@@ -27,11 +32,15 @@ COMMAND_ON = ["wlr-randr", "--output", "HDMI-A-1", "--on", "--mode", "1920x1080"
 COMMAND_OFF = ["wlr-randr", "--output", "HDMI-A-1", "--off"]
 COMMAND_START_PICFRAME = ["/home/mickaelramilison/start_picframe.sh"]
 COMMAND_STOP_PICFRAME = ["pkill", "-f", "picframe"]
+COMMAND_SYSTEM_UPDATE = "sudo apt-get update && sudo apt-get upgrade -y"
+COMMAND_REBOOT = ["sudo", "reboot"]
 
 def is_manual_override_active():
+    """Checks if the manual override flag file exists."""
     return os.path.exists(MANUAL_OVERRIDE_FLAG)
 
 def is_picframe_running():
+    """Checks if the picframe process is running."""
     try:
         result = subprocess.run(["pgrep", "-f", "picframe"], capture_output=True)
         return result.returncode == 0
@@ -39,10 +48,12 @@ def is_picframe_running():
         return False
 
 def is_within_active_hours():
+    """Checks if the current time is within the active hours."""
     current_hour = datetime.now().hour
     return ACTIVE_START_HOUR <= current_hour < ACTIVE_END_HOUR
 
 def check_presence():
+    """Scans for the user's phone via Wi-Fi and Bluetooth."""
     print("Scanning for phone...")
     try:
         command_wifi = ['sudo', 'nmap', '-sn', '192.168.1.0/24']
@@ -72,10 +83,15 @@ while True:
     now = datetime.now()
     today = date.today()
     if now.hour == 8 and today != last_daily_reset:
-        print("It's 8 AM, performing daily reset to Auto Mode...")
+        print("It's 8 AM, performing daily reset...")
         if is_manual_override_active():
             os.remove(MANUAL_OVERRIDE_FLAG)
             print("Manual override flag removed.")
+
+        if os.path.exists(REBOOT_FLAG):
+            os.remove(REBOOT_FLAG)
+            print("Daily reboot flag file has been removed.")
+
         last_daily_reset = today
 
     # Main Control Logic
@@ -120,5 +136,24 @@ while True:
             print("User still not detected after 5 minutes. Shutting down screen and picframe.")
             subprocess.run(COMMAND_STOP_PICFRAME)
             subprocess.run(COMMAND_OFF, env=env)
-            print(f"Waiting for {AWAY_SCAN_INTERVAL} seconds...")
-            time.sleep(AWAY_SCAN_INTERVAL)
+
+            if not os.path.exists(REBOOT_FLAG):
+                print("Daily update has not been performed. Starting system update...")
+                try:
+                    # Create the flag file to prevent another reboot today
+                    with open(REBOOT_FLAG, 'w') as f:
+                        pass # Create an empty file
+
+                    print(f"Reboot flag created at {REBOOT_FLAG}. Proceeding with update and reboot.")
+                    subprocess.run(COMMAND_SYSTEM_UPDATE, shell=True, check=True)
+                    print("System update successful. Rebooting now...")
+                    subprocess.run(COMMAND_REBOOT)
+                except subprocess.CalledProcessError as e:
+                    print(f"An error occurred during system update: {e}")
+                    print("Skipping reboot. The script will not attempt another update until tomorrow.")
+                    print(f"Waiting for {AWAY_SCAN_INTERVAL} seconds...")
+                    time.sleep(AWAY_SCAN_INTERVAL)
+            else:
+                print("Daily update & reboot already performed. Skipping.")
+                print(f"Waiting for {AWAY_SCAN_INTERVAL} seconds...")
+                time.sleep(AWAY_SCAN_INTERVAL)
