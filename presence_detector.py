@@ -2,6 +2,7 @@
 import subprocess
 import time
 import os
+import re # Import regex for parsing ddcutil output
 from datetime import datetime, date
 
 # Give the desktop environment 10 seconds to fully load after a reboot.
@@ -17,12 +18,14 @@ SLEEPING_SCAN_INTERVAL = 1800
 ACTIVE_START_HOUR = 8
 ACTIVE_END_HOUR = 23
 
+# NEW: The VCP value for your Pi's HDMI input.
+# You MUST find this value for your specific monitor. See instructions below.
+PI_HDMI_INPUT_VALUE = 15 # Example: 15 for HDMI-1, 16 for HDMI-2
+
 # --- Use the user's home directory for persistent flags ---
-# The /tmp directory is wiped on reboot, so we use the home directory instead.
-USER_HOME = os.path.expanduser("~") # Gets /home/mickaelramilison
+USER_HOME = os.path.expanduser("~")
 MANUAL_OVERRIDE_FLAG = os.path.join(USER_HOME, "manual_override.flag")
 REBOOT_FLAG = os.path.join(USER_HOME, "reboot_done.flag")
-
 
 # --- Environment and Commands ---
 env = os.environ.copy()
@@ -47,6 +50,29 @@ def is_picframe_running():
     except Exception:
         return False
 
+# NEW: Function to check if the Pi's input is the one currently displayed on the monitor.
+def is_pi_the_active_source():
+    """Checks the monitor's active input source using ddcutil."""
+    print("Checking if Pi is the active video source...")
+    try:
+        # Run ddcutil to get VCP feature 60 (Input Source)
+        result = subprocess.run(
+            ["ddcutil", "getvcp", "60"],
+            capture_output=True, text=True, check=True, env=env
+        )
+        # Use regex to find "current value =    xx"
+        match = re.search(r"current value\s*=\s*(\d+)", result.stdout)
+        if match:
+            current_input = int(match.group(1))
+            print(f"Monitor's current input value is {current_input}. Pi's configured input value is {PI_HDMI_INPUT_VALUE}.")
+            return current_input == PI_HDMI_INPUT_VALUE
+        # If parsing fails, return True to be safe and maintain old behavior
+        print("Could not parse ddcutil output. Assuming Pi is active source to be safe.")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError, Exception) as e:
+        print(f"Error checking active source with ddcutil: {e}. Assuming Pi is active source.")
+        return True # Return True to be safe on error
+
 def is_within_active_hours():
     """Checks if the current time is within the active hours."""
     current_hour = datetime.now().hour
@@ -54,6 +80,7 @@ def is_within_active_hours():
 
 def check_presence():
     """Scans for the user's phone via Wi-Fi and Bluetooth."""
+    # (This function is unchanged)
     print("Scanning for phone...")
     try:
         command_wifi = ['sudo', 'nmap', '-sn', '192.168.1.0/24']
@@ -79,7 +106,7 @@ print("Initialization complete. Starting main loop...")
 last_daily_reset = None
 
 while True:
-    # Daily Reset Logic
+    # Daily Reset Logic (Unchanged)
     now = datetime.now()
     today = date.today()
     if now.hour == 8 and today != last_daily_reset:
@@ -87,11 +114,9 @@ while True:
         if is_manual_override_active():
             os.remove(MANUAL_OVERRIDE_FLAG)
             print("Manual override flag removed.")
-
         if os.path.exists(REBOOT_FLAG):
             os.remove(REBOOT_FLAG)
             print("Daily reboot flag file has been removed.")
-
         last_daily_reset = today
 
     # Main Control Logic
@@ -103,7 +128,12 @@ while True:
     if not is_within_active_hours():
         print("Sleeping time. Ensuring screen and picframe are OFF.")
         subprocess.run(COMMAND_STOP_PICFRAME)
-        subprocess.run(COMMAND_OFF, env=env)
+        # MODIFIED: Check active source before turning off
+        if is_pi_the_active_source():
+            print("Pi is the active source. Turning screen OFF for the night.")
+            subprocess.run(COMMAND_OFF, env=env)
+        else:
+            print("Another device is using the monitor. Will not turn screen off.")
         print(f"Waiting for {SLEEPING_SCAN_INTERVAL} seconds...")
         time.sleep(SLEEPING_SCAN_INTERVAL)
         continue
@@ -120,7 +150,6 @@ while True:
         else:
             print("User is home. Picframe already running, ensuring screen is ON.")
             subprocess.run(COMMAND_ON, env=env)
-
         print(f"Waiting for {HOME_SCAN_INTERVAL} seconds for next check...")
         time.sleep(HOME_SCAN_INTERVAL)
     else:
@@ -133,17 +162,20 @@ while True:
             print("User re-detected. Aborting shutdown.")
             continue
         else:
-            print("User still not detected after 5 minutes. Shutting down screen and picframe.")
+            print("User still not detected after 5 minutes. Shutting down picframe.")
             subprocess.run(COMMAND_STOP_PICFRAME)
-            subprocess.run(COMMAND_OFF, env=env)
+            # MODIFIED: Check active source before turning off
+            if is_pi_the_active_source():
+                print("Pi is the active source. Turning screen OFF.")
+                subprocess.run(COMMAND_OFF, env=env)
+            else:
+                print("Another device is using the monitor. Will not turn screen off.")
 
             if not os.path.exists(REBOOT_FLAG):
                 print("Daily update has not been performed. Starting system update...")
                 try:
-                    # Create the flag file to prevent another reboot today
                     with open(REBOOT_FLAG, 'w') as f:
-                        pass # Create an empty file
-
+                        pass
                     print(f"Reboot flag created at {REBOOT_FLAG}. Proceeding with update and reboot.")
                     subprocess.run(COMMAND_SYSTEM_UPDATE, shell=True, check=True)
                     print("System update successful. Rebooting now...")
