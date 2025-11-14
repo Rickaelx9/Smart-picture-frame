@@ -15,8 +15,8 @@ BLUETOOTH_MAC_ADDRESS = "9C:73:B1:F5:40:1A"
 HOME_SCAN_INTERVAL = 300
 AWAY_SCAN_INTERVAL = 60
 SLEEPING_SCAN_INTERVAL = 1800
-ACTIVE_START_HOUR = 8
-ACTIVE_END_HOUR = 23
+ACTIVE_START_HOUR = 9
+ACTIVE_END_HOUR = 22
 
 # NEW: The VCP value for your Pi's HDMI input.
 # You MUST find this value for your specific monitor. See instructions below.
